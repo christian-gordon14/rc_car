@@ -11,6 +11,8 @@
  All text above, and the splash screen below must be included in
  any redistribution
 *********************************************************************/
+//autoForward
+bool autoForward;
 // HB pin definitions
 int motor1pin1 = 2;
 int motor1pin2 = 3;
@@ -236,36 +238,45 @@ void setup(void)
     @brief  Constantly poll for new command or response data
 */
 /**************************************************************************/
+
 void loop(void)
 {
-    // US CODE
-digitalWrite(trigPin, LOW);
-delayMicroseconds(2);
-digitalWrite(trigPin, HIGH);
-delayMicroseconds(10);
-digitalWrite(trigPin, LOW);
+  myDistanceReading();
+  motorControl();
+  autoControl();    
+}
 
-duration = pulseIn(echoPin, HIGH);
-distance = (duration*.0343)/2;
+void myDistanceReading(){
+  // Ultra Sonic Sensor Code
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
 
+  duration = pulseIn(echoPin, HIGH);
+  distance = (duration*.0343)/2;
   if (distance > 100){
-digitalWrite (LEDG, HIGH);
+  digitalWrite (LEDG, HIGH);
+  }
+  else{
+  digitalWrite(LEDG, LOW);
+  }
+    if ((distance >= 30) && (distance<= 100)){
+  digitalWrite (LEDY, HIGH);
+  }else{
+  digitalWrite(LEDY, LOW);
+  }
+  if(distance < 30){
+  digitalWrite (LEDR, HIGH);
+  }
+  else{
+  digitalWrite (LEDR, LOW);
+  }
+  //Serial.println(distance);
 }
-else{
-digitalWrite(LEDG, LOW);
-}
-  if ((distance >= 50) && (distance<= 100)){
-digitalWrite (LEDY, HIGH);
-}else{
-digitalWrite(LEDY, LOW);
-}
-if(distance < 50){
-digitalWrite (LEDR, HIGH);
-delay(100);
-}
-else{
-digitalWrite (LEDR, LOW);
-}
+
+void motorControl(){
   /* Wait for new data to arrive */
   uint8_t len = readPacket(&ble, BLE_READPACKET_TIMEOUT);
   if (len == 0) return;
@@ -296,13 +307,6 @@ digitalWrite (LEDR, LOW);
   if (packetbuffer[1] == 'B') {
     uint8_t buttnum = packetbuffer[2] - '0';
     boolean pressed = packetbuffer[3] - '0';
-    /*
-    idea for new code, if the sensor reads anything closer and equal to 10 cm, back up, else listen to the commands given. 
-    This will ensure that the car does not run into anything in the forward direction. 
-    if sensor reads x > 10 cm
-    activate sequence 1 (turn on motors to turn arounf)
-    else if ...
-    */
     // Speed of motors 
     /* can range from 0 : 255 (0 being the slowest)
     analogWrite(16, 100); // Motor 1
@@ -310,12 +314,22 @@ digitalWrite (LEDR, LOW);
     analogWrite(18, 100); // Motor 3
     analogWrite(19, 100); // Motor 4
     */
+    
     if (pressed) {
       // will need to add code for other button, this will command the user (if looking
       // at this interface to use a different button)
-      if ((buttnum == 1) && (digitalRead(out1) == (HIGH))) {
-      // Move Forward
+      if (buttnum == 1) {
         Serial.println("Button 1 pressed");
+        autoForward = true;
+        Serial.println(autoForward);
+      }
+      if (buttnum == 2) {
+      Serial.println("Button 2 pressed");
+      autoForward = false;
+      }
+      else if ((buttnum == 5) && (digitalRead(out1))) {
+      // Move Forward
+        Serial.println("Button 5 pressed");
         // Motor 1
         digitalWrite(motor1pin1, LOW); // all motors forward
         digitalWrite(motor1pin2, HIGH);
@@ -329,9 +343,9 @@ digitalWrite (LEDR, LOW);
         digitalWrite(motor4pin1, HIGH);
         digitalWrite(motor4pin2, LOW);
       }
-      else if ((buttnum == 2) && (digitalRead(out2) == (HIGH))){ 
+      else if ((buttnum == 6) && (digitalRead(out2) == (HIGH))){ 
       // Move Backwards
-        Serial.println("Button 2 pressed");
+        Serial.println("Button 6 pressed");
         // Motor 1
         digitalWrite(motor1pin1, HIGH); // all motors forward
         digitalWrite(motor1pin2, LOW);
@@ -345,9 +359,9 @@ digitalWrite (LEDR, LOW);
         digitalWrite(motor4pin1, LOW);
         digitalWrite(motor4pin2, HIGH);
         }
-      else if (buttnum == 3) {
+      else if (buttnum == 8) {
       // Spin CW
-        Serial.println("Button 3 pressed");
+        Serial.println("Button 8 pressed");
         // Motor 1
         digitalWrite(motor1pin1, LOW); // all motors forward
         digitalWrite(motor1pin2, HIGH);
@@ -362,9 +376,9 @@ digitalWrite (LEDR, LOW);
         digitalWrite(motor4pin2, HIGH);      
         }
 
-      else if (buttnum == 4) {
+      else if (buttnum == 7) {
       // Spin CCW
-        Serial.println("Button 4 pressed");
+        Serial.println("Button 7 pressed");
         // Motor 1
         digitalWrite(motor1pin1, HIGH);
         digitalWrite(motor1pin2, LOW);
@@ -382,6 +396,7 @@ digitalWrite (LEDR, LOW);
     else {
       Serial.print ("Button "); Serial.print(buttnum); Serial.println(" released");
       // Motor 1
+      if(autoForward != true){
       digitalWrite(motor1pin1, LOW);
       digitalWrite(motor1pin2, LOW);
       // Motor 2
@@ -393,72 +408,39 @@ digitalWrite (LEDR, LOW);
       // Motor 4
       digitalWrite(motor4pin1, LOW);
       digitalWrite(motor4pin2, LOW);
+      }
     }
-
   }
-
-  // GPS Location
-  if (packetbuffer[1] == 'L') {
-    float lat, lon, alt;
-    lat = parsefloat(packetbuffer+2);
-    lon = parsefloat(packetbuffer+6);
-    alt = parsefloat(packetbuffer+10);
-    Serial.print("GPS Location\t");
-    Serial.print("Lat: "); Serial.print(lat, 4); // 4 digits of precision!
-    Serial.print('\t');
-    Serial.print("Lon: "); Serial.print(lon, 4); // 4 digits of precision!
-    Serial.print('\t');
-    Serial.print(alt, 4); Serial.println(" meters");
-  }
-
-  // Accelerometer
-  if (packetbuffer[1] == 'A') {
-    float x, y, z;
-    x = parsefloat(packetbuffer+2);
-    y = parsefloat(packetbuffer+6);
-    z = parsefloat(packetbuffer+10);
-    Serial.print("Accel\t");
-    Serial.print(x); Serial.print('\t');
-    Serial.print(y); Serial.print('\t');
-    Serial.print(z); Serial.println();
-  }
-
-  // Magnetometer
-  if (packetbuffer[1] == 'M') {
-    float x, y, z;
-    x = parsefloat(packetbuffer+2);
-    y = parsefloat(packetbuffer+6);
-    z = parsefloat(packetbuffer+10);
-    Serial.print("Mag\t");
-    Serial.print(x); Serial.print('\t');
-    Serial.print(y); Serial.print('\t');
-    Serial.print(z); Serial.println();
-  }
-
-  // Gyroscope
-  if (packetbuffer[1] == 'G') {
-    float x, y, z;
-    x = parsefloat(packetbuffer+2);
-    y = parsefloat(packetbuffer+6);
-    z = parsefloat(packetbuffer+10);
-    Serial.print("Gyro\t");
-    Serial.print(x); Serial.print('\t');
-    Serial.print(y); Serial.print('\t');
-    Serial.print(z); Serial.println();
-  }
-
-  // Quaternions
-  if (packetbuffer[1] == 'Q') {
-    float x, y, z, w;
-    x = parsefloat(packetbuffer+2);
-    y = parsefloat(packetbuffer+6);
-    z = parsefloat(packetbuffer+10);
-    w = parsefloat(packetbuffer+14);
-    Serial.print("Quat\t");
-    Serial.print(x); Serial.print('\t');
-    Serial.print(y); Serial.print('\t');
-    Serial.print(z); Serial.print('\t');
-    Serial.print(w); Serial.println();
-  }
-
 }
+void autoControl(){
+  if (distance < 2000 && autoForward == true){
+        digitalWrite(motor1pin1, LOW); // all motors forward
+        digitalWrite(motor1pin2, HIGH);
+        // Motor 2
+        digitalWrite(motor2pin1, HIGH);
+        digitalWrite(motor2pin2, LOW);
+        // Motor 3
+        digitalWrite(motor3pin1, HIGH);
+        digitalWrite(motor3pin2, LOW);
+        // Motor 4
+        digitalWrite(motor4pin1, HIGH);
+        digitalWrite(motor4pin2, LOW);
+        Serial.println("1"); 
+        Serial.println(distance); 
+  }
+      else {  
+      // Motor 1
+      digitalWrite(motor1pin1, LOW);
+      digitalWrite(motor1pin2, LOW);
+      // Motor 2
+      digitalWrite(motor2pin1, LOW);
+      digitalWrite(motor2pin2, LOW);
+      // Motor 3
+      digitalWrite(motor3pin1, LOW);
+      digitalWrite(motor3pin2, LOW);
+      // Motor 4
+      digitalWrite(motor4pin1, LOW);
+      digitalWrite(motor4pin2, LOW);
+      }
+}
+
