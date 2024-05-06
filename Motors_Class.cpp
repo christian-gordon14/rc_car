@@ -1,35 +1,475 @@
-#include <iostream>
-using namespace std;
+/*********************************************************************
+ This is an example for our nRF51822 based Bluefruit LE modules
 
-class Motors {
-  public:
-  int positivePin;
-  int negativePin;
-  bool positiveValue;
-  bool negativeValue;
-  void writingMotor(int positivePin, bool positiveValue, int negativePin, bool negativeValue){
-    digitalWrite(positivePin,positiveValue);
-    digitalWrite(negativePin,negativeValue);
+ Pick one up today in the adafruit shop!
+
+ Adafruit invests time and resources providing this open source code,
+ please support Adafruit and open-source hardware by purchasing
+ products from Adafruit!
+
+ MIT license, check LICENSE for more information
+ All text above, and the splash screen below must be included in
+ any redistribution
+*********************************************************************/
+// autoPilot
+bool autoPilot;
+int sequencer;
+bool sequencerClear;
+int outsideButtnum;
+// HB pin definitions
+int motor1pin1 = 2;
+int motor1pin2 = 3;
+int motor2pin1 = 10;
+int motor2pin2 = 9;
+int motor3pin1 = 5;
+int motor3pin2 = 6;
+int motor4pin1 = 22;
+int motor4pin2 = 24;
+// Speed Control
+/*
+int speed1 = 11;
+int speed2 = 12;
+int speed3 = 33;
+int speed4 = 35;
+*/
+
+float duration, distance;
+// IR Sensor 1
+int out1 = 34;
+// IR Sensor 2
+int out2 = 13;
+// US sensor definitions
+const int trigPin = 47;
+const int echoPin = 49;
+const int LEDG = 45;
+const int LEDY = 43;
+const int LEDR = 41;
+
+#include <Arduino.h>
+#include <SPI.h>
+#include <string.h>
+
+#include "Adafruit_BLE.h"
+#include "Adafruit_BluefruitLE_SPI.h"
+#include "Adafruit_BluefruitLE_UART.h"
+#include "BluefruitConfig.h"
+
+#if SOFTWARE_SERIAL_AVAILABLE
+#include <SoftwareSerial.h>
+#endif
+
+/*=========================================================================
+    APPLICATION SETTINGS
+
+    FACTORYRESET_ENABLE       Perform a factory reset when running this sketch
+   
+                              Enabling this will put your Bluefruit LE module
+                              in a 'known good' state and clear any config
+                              data set in previous sketches or projects, so
+                              running this at least once is a good idea.
+   
+                              When deploying your project, however, you will
+                              want to disable factory reset by setting this
+                              value to 0.  If you are making changes to your
+                              Bluefruit LE device via AT commands, and those
+                              changes aren't persisting across resets, this
+                              is the reason why.  Factory reset will erase
+                              the non-volatile memory where config data is
+                              stored, setting it back to factory default
+                              values.
+       
+                              Some sketches that require you to bond to a
+                              central device (HID mouse, keyboard, etc.)
+                              won't work at all with this feature enabled
+                              since the factory reset will clear all of the
+                              bonding data stored on the chip, meaning the
+                              central device won't be able to reconnect.
+    MINIMUM_FIRMWARE_VERSION  Minimum firmware version to have some new features
+    MODE_LED_BEHAVIOUR        LED activity, valid options are
+                              "DISABLE" or "MODE" or "BLEUART" or
+                              "HWUART"  or "SPI"  or "MANUAL"
+    -----------------------------------------------------------------------*/
+#define FACTORYRESET_ENABLE 1
+#define MINIMUM_FIRMWARE_VERSION "0.6.6"
+#define MODE_LED_BEHAVIOUR "MODE"
+/*=========================================================================*/
+
+// Create the bluefruit object, either software serial...uncomment these lines
+/*
+SoftwareSerial bluefruitSS = SoftwareSerial(BLUEFRUIT_SWUART_TXD_PIN,
+BLUEFRUIT_SWUART_RXD_PIN);
+
+Adafruit_BluefruitLE_UART ble(bluefruitSS, BLUEFRUIT_UART_MODE_PIN,
+                      BLUEFRUIT_UART_CTS_PIN, BLUEFRUIT_UART_RTS_PIN);
+*/
+
+/* ...or hardware serial, which does not need the RTS/CTS pins. Uncomment this
+ * line */
+// Adafruit_BluefruitLE_UART ble(BLUEFRUIT_HWSERIAL_NAME,
+// BLUEFRUIT_UART_MODE_PIN);
+
+/* ...hardware SPI, using SCK/MOSI/MISO hardware SPI pins and then user selected
+ * CS/IRQ/RST */
+Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ,
+                             BLUEFRUIT_SPI_RST);
+
+/* ...software SPI, using SCK/MOSI/MISO user-defined SPI pins and then user
+ * selected CS/IRQ/RST */
+// Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_SCK, BLUEFRUIT_SPI_MISO,
+//                             BLUEFRUIT_SPI_MOSI, BLUEFRUIT_SPI_CS,
+//                             BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
+
+// A small helper
+void error(const __FlashStringHelper *err) {
+  Serial.println(err);
+  while (1)
+    ;
+}
+
+// function prototypes over in packetparser.cpp
+uint8_t readPacket(Adafruit_BLE *ble, uint16_t timeout);
+float parsefloat(uint8_t *buffer);
+void printHex(const uint8_t *data, const uint32_t numBytes);
+
+// the packet buffer
+extern uint8_t packetbuffer[];
+
+/**************************************************************************/
+/*!
+    @brief  Sets up the HW an the BLE module (this function is called
+            automatically on startup)
+*/
+/**************************************************************************/
+void setup(void) {
+  // New Code
+  pinMode(motor1pin1, OUTPUT);
+  pinMode(motor1pin2, OUTPUT);
+  pinMode(motor2pin1, OUTPUT);
+  pinMode(motor2pin2, OUTPUT);
+  pinMode(motor3pin1, OUTPUT);
+  pinMode(motor3pin2, OUTPUT);
+  pinMode(motor4pin1, OUTPUT);
+  pinMode(motor4pin2, OUTPUT);
+  // H_Bridge_1
+  pinMode(3, OUTPUT);  // Motor 1
+  pinMode(2, OUTPUT);
+  pinMode(9, OUTPUT);  // Motor 2
+  pinMode(10, OUTPUT);
+  pinMode(33, OUTPUT);  // Speed Control
+  pinMode(35, OUTPUT);
+  // H_Bride_2
+  pinMode(5, OUTPUT);  // Motor 3
+  pinMode(6, OUTPUT);
+  pinMode(22, OUTPUT);  // Motor 4
+  pinMode(24, OUTPUT);
+  pinMode(11, OUTPUT);  // Speed Control
+  pinMode(12, OUTPUT);
+  // IR_Sensor_1
+  pinMode(51, INPUT);
+  // IR_Sensor_2
+  pinMode(53, INPUT);
+  // US_Sensor
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  Serial.begin(115200);
+  pinMode(LEDG, OUTPUT);
+  pinMode(LEDY, OUTPUT);
+  pinMode(LEDR, OUTPUT);
+  /* NOTE MAY NEED TO ADJUST BAUD RATE FROM 115200 TO 9600 IF THE US SENSOR DOES
+  NOT WORK WILL NEED TO BE INVESTIGATED */
+  // End of New Code
+  while (!Serial)
+    ;  // required for Flora & Micro
+  delay(500);
+
+  Serial.begin(115200);
+  Serial.println(F("Adafruit Bluefruit App Controller Example"));
+  Serial.println(F("-----------------------------------------"));
+
+  /* Initialise the module */
+  Serial.print(F("Initialising the Bluefruit LE module: "));
+
+  if (!ble.begin(VERBOSE_MODE)) {
+    error(
+        F("Couldn't find Bluefruit, make sure it's in CoMmanD mode & check "
+          "wiring?"));
+  }
+  Serial.println(F("OK!"));
+
+  if (FACTORYRESET_ENABLE) {
+    /* Perform a factory reset to make sure everything is in a known state */
+    Serial.println(F("Performing a factory reset: "));
+    if (!ble.factoryReset()) {
+      error(F("Couldn't factory reset"));
+    }
   }
 
-};
+  /* Disable command echo from Bluefruit */
+  ble.echo(false);
 
-int main(){
-  Motors Motor1;
-  Motor1.positivePin = 2;
-  Motor1.negativePin = 3;
-  Motor1.positiveValue = LOW;
-  Motor1.negativeValue = LOW;
+  Serial.println("Requesting Bluefruit info:");
+  /* Print Bluefruit information */
+  ble.info();
 
-  Motors Motor2;
-  Motor2.positivePin = 10;
-  Motor2.negativePin = 9;
+  Serial.println(
+      F("Please use Adafruit Bluefruit LE app to connect in Controller mode"));
+  Serial.println(
+      F("Then activate/use the sensors, color picker, game controller, etc!"));
+  Serial.println();
 
-  Motors Motor3;
-  Motor3.positivePin = 5;
-  Motor3.negativePin = 6;
+  ble.verbose(false);  // debug info is a little annoying after this point!
 
-  Motors Motor4;
-  Motor4.positivePin = 22;
-  Motor4.negativePin = 24;
+  /* Wait for connection */
+  while (!ble.isConnected()) {
+    delay(500);
+  }
+
+  Serial.println(F("******************************"));
+
+  // LED Activity command is only supported from 0.6.6
+  if (ble.isVersionAtLeast(MINIMUM_FIRMWARE_VERSION)) {
+    // Change Mode LED Activity
+    Serial.println(F("Change LED activity to " MODE_LED_BEHAVIOUR));
+    ble.sendCommandCheckOK("AT+HWModeLED=" MODE_LED_BEHAVIOUR);
+  }
+
+  // Set Bluefruit to DATA mode
+  Serial.println(F("Switching to DATA mode!"));
+  ble.setMode(BLUEFRUIT_MODE_DATA);
+
+  Serial.println(F("******************************"));
+}
+
+/**************************************************************************/
+/*!
+    @brief  Constantly poll for new command or response data
+*/
+/**************************************************************************/
+
+void loop(void) {
+  myDistanceReading();
+  motorControl();
+  autoControl();
+}
+
+void myDistanceReading() {
+  // Ultra Sonic Sensor Code
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  duration = pulseIn(echoPin, HIGH);
+  distance = (duration * .0343) / 2;
+  if (distance > 100) {
+    digitalWrite(LEDG, HIGH);
+  } else {
+    digitalWrite(LEDG, LOW);
+  }
+  if ((distance >= 30) && (distance <= 100)) {
+    digitalWrite(LEDY, HIGH);
+  } else {
+    digitalWrite(LEDY, LOW);
+  }
+  if (distance < 30) {
+    digitalWrite(LEDR, HIGH);
+  } else {
+    digitalWrite(LEDR, LOW);
+  }
+  // Serial.println(distance);
+}
+
+void moveForward(){
+// Move Forward
+        // Motor 1
+        digitalWrite(motor1pin1, LOW);  // all motors forward
+        digitalWrite(motor1pin2, HIGH);
+        // Motor 2
+        digitalWrite(motor2pin1, HIGH);
+        digitalWrite(motor2pin2, LOW);
+        // Motor 3
+        digitalWrite(motor3pin1, HIGH);
+        digitalWrite(motor3pin2, LOW);
+        // Motor 4
+        digitalWrite(motor4pin1, HIGH);
+        digitalWrite(motor4pin2, LOW);
+}
+
+void moveBackwards(){
+  // Move Backwards
+        // Motor 1
+        digitalWrite(motor1pin1, HIGH);
+        digitalWrite(motor1pin2, LOW);
+        // Motor 2
+        digitalWrite(motor2pin1, LOW);
+        digitalWrite(motor2pin2, HIGH);
+        // Motor 3
+        digitalWrite(motor3pin1, LOW);
+        digitalWrite(motor3pin2, HIGH);
+        // Motor 4
+        digitalWrite(motor4pin1, LOW);
+        digitalWrite(motor4pin2, HIGH);
+}
+void moveClockwise(){
+        // Motor 1
+        digitalWrite(motor1pin1, LOW);
+        digitalWrite(motor1pin2, HIGH);
+        // Motor 2
+        digitalWrite(motor2pin1, LOW);
+        digitalWrite(motor2pin2, HIGH);
+        // Motor 3
+        digitalWrite(motor3pin1, HIGH);
+        digitalWrite(motor3pin2, LOW);
+        // Motor 4
+        digitalWrite(motor4pin1, LOW);
+        digitalWrite(motor4pin2, HIGH);
+}
+
+void moveCounterClockwise(){
+        // Motor 1
+        digitalWrite(motor1pin1, HIGH);
+        digitalWrite(motor1pin2, LOW);
+        // Motor 2
+        digitalWrite(motor2pin1, HIGH);
+        digitalWrite(motor2pin2, LOW);
+        // Motor 3
+        digitalWrite(motor3pin1, LOW);
+        digitalWrite(motor3pin2, HIGH);
+        // Motor 4
+        digitalWrite(motor4pin1, HIGH);
+        digitalWrite(motor4pin2, LOW);
+}
+
+void stopMoving(){
+    digitalWrite(motor1pin1, LOW);
+    digitalWrite(motor1pin2, LOW);
+    // Motor 2
+    digitalWrite(motor2pin1, LOW);
+    digitalWrite(motor2pin2, LOW);
+    // Motor 3
+    digitalWrite(motor3pin1, LOW);
+    digitalWrite(motor3pin2, LOW);
+    // Motor 4
+    digitalWrite(motor4pin1, LOW);
+    digitalWrite(motor4pin2, LOW);
+}
+
+void motorControl() {
+  /* Wait for new data to arrive */
+  uint8_t len = readPacket(&ble, BLE_READPACKET_TIMEOUT);
+  if (len == 0) return;
+
+  /* Got a packet! */
+  // printHex(packetbuffer, len);
+
+  // Color
+  if (packetbuffer[1] == 'C') {
+    uint8_t red = packetbuffer[2];
+    uint8_t green = packetbuffer[3];
+    uint8_t blue = packetbuffer[4];
+    Serial.print("RGB #");
+    if (red < 0x10) Serial.print("0");
+    Serial.print(red, HEX);
+    if (green < 0x10) Serial.print("0");
+    Serial.print(green, HEX);
+    if (blue < 0x10) Serial.print("0");
+    Serial.println(blue, HEX);
+  }
+
+  // Buttons
+  /* Motor 1 uses pins 2 and 3
+     Motor 2 uses pins 9 and 8
+     Motor 3 uses pins 14 and 15
+     Motor 4 uses pins 5 and 6
+  */
+  if (packetbuffer[1] == 'B') {
+    uint8_t buttnum = packetbuffer[2] - '0';
+    boolean pressed = packetbuffer[3] - '0';
+    // Speed of motors
+    /* can range from 0 : 255 (0 being the slowest)
+    analogWrite(16, 100); // Motor 1
+    analogWrite(17, 100); // Motor 2
+    analogWrite(18, 100); // Motor 3
+    analogWrite(19, 100); // Motor 4
+    */
+
+    if (pressed) {
+      // will need to add code for other button, this will command the user (if
+      // looking at this interface to use a different button)
+      // Start Autopilot
+      if (buttnum == 1) {
+        Serial.println("Button 1 pressed");
+        outsideButtnum = 1;
+        autoPilot = true;
+        Serial.println(autoPilot);
+      }
+      // Stop Autopilot
+      if (buttnum == 2) {
+        Serial.println("Button 2 pressed");
+        outsideButtnum = 2;
+        autoPilot = false;
+
+      // Move Forward  
+      } else if ((buttnum == 5) && (digitalRead(out1)) && (autoPilot == false)) {
+        Serial.println("Button 5 pressed");
+        outsideButtnum = 5;
+        moveForward();
+        Serial.println("After Command");
+  
+      // Move Backward
+      } else if ((buttnum == 6) && (digitalRead(out2)) && (autoPilot == false)) {
+        Serial.println("Button 6 pressed");
+        outsideButtnum = 6;
+        moveBackwards();
+
+      // Spin Clocwise
+      } else if ((buttnum == 8) && (autoPilot == false)) {
+        Serial.println("Button 8 pressed");
+        outsideButtnum = 8;
+        moveClockwise();
+      }
+
+      // Spin Counter Clockwise
+      else if ((buttnum == 7) && (autoPilot == false)) {
+        // Spin CCW
+        Serial.println("Button 7 pressed");
+        outsideButtnum = 7;
+        moveCounterClockwise();
+      }
+    } else {
+      Serial.print("Button ");
+      Serial.print(buttnum);
+      Serial.println(" released");
+      // Motor 1
+      if (autoPilot != true && outsideButtnum > 4) {
+        stopMoving();
+      }
+    }
+  }
+}
+void autoControl() {
+  if (distance > 50 && autoPilot == true) {
+    moveForward();
+    sequencer = 1;
+    Serial.println(sequencer);
+    Serial.println(distance);
+  }
+  else if (autoPilot == false && outsideButtnum < 4) {
+    // Motor 1
+    stopMoving();
+    sequencer = 2;
+    Serial.println(sequencer);
+    Serial.println(distance);
+  }
+  if (sequencer == 2 && autoPilot == true){
+    moveBackwards();
+    sequencer = 3;
+    Serial.println(sequencer);
+  }
+  else if (sequencer == 3 && autoPilot == true){
+    moveClockwise();
+    sequencer = 4;
+    Serial.println(sequencer);
+  }
 }
